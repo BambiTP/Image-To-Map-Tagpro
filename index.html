@@ -1,0 +1,1436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Image To Map</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    #canvasContainer {
+  display: flex;
+  justify-content: center; /* Center the canvases horizontally */
+  margin: 20px 0;
+}
+
+#outputCanvas {
+  display: none; /* Keep it hidden */
+}
+
+#mainCanvas {
+  border: 1px solid #ccc;
+  margin: 0 10px; /* Space between canvases */
+  max-width: 100%; /* Prevent stretching */
+  height: auto; /* Maintain aspect ratio */
+}
+
+    table {
+      border-collapse: collapse;
+      margin: 20px 0;
+    }
+
+    td {
+      width: 1px;
+      height: 1px;
+    }
+
+    #buttonContainer {
+      margin: 20px 0;
+    }
+
+    button {
+      margin: 0 5px; /* Space between buttons */
+      padding: 10px 15px;
+      cursor: pointer;
+      background-color: #007BFF;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      transition: background-color 0.3s;
+    }
+
+    button:hover {
+      background-color: #0056b3;
+    }
+
+    #result {
+      display: none; /* Hide the textarea */
+    }
+
+    #dithering-technique {
+      margin: 10px 0;
+    }
+  </style>
+</head>
+<body>
+  <div>
+    <a href="https://www.simpleimageresizer.com/">https://www.simpleimageresizer.com</a>
+  </div>
+  <div>
+    <a href="https://www.remove.bg/upload">https://www.remove.bg/upload</a>
+  </div>
+
+  <div id="canvasContainer">
+    <canvas id="outputCanvas"></canvas>
+    <canvas id="mainCanvas"></canvas>
+  </div>
+
+  <div id="buttonContainer">
+    <button onclick="json()">Download JSON</button>
+    <button onclick="png()">Download PNG</button>
+  </div>
+
+  <input type="file" id="imageInput">
+  <table id="arrayTable"></table>
+  <textarea id="result" rows="10" cols="40"></textarea>
+
+  <select id="dithering-technique">
+    <option value="nearest">Nearest Color</option>
+    <option value="floyd-steinberg">Floyd-Steinberg</option>
+    <option value="bayer">Bayer</option>
+    <option value="order">Ordered</option>
+    <option value="atkinson">Atkinson</option>
+    <option value="jarvis">Jarvis Judice Ninke</option>
+    <option value="stucki">Stucki</option>
+    <option value="sierra">Sierra</option>
+    <option value="burkes">Burkes</option>
+    <option value="threshold">Custom Threshold</option>
+    <option value="noise">Random Noise</option>
+    <option value="blue">Blue Noise</option>
+    <option value="half">Half Toning</option>
+  </select>
+</body>
+</html>
+
+  <script>
+//<option value="stwo">Sierra 2 4A</option>
+//<option value="dot">Dot Diffusion</option>
+//<option value="two">Two Row Sierra</option>
+//<option value="fan">Fan Dithering</option>
+//<option value="cluster">Cluster Dot</option>
+//<option value="osm">Ostromoukhov</option>
+//<option value="gradient">Gradient Based</option>
+//<option value="rim">Riemersma</option>
+
+document.getElementById("dithering-technique").addEventListener("change", function() {
+  updateResultTextArea(); // Update the text area with dithered data
+  displayImageTable();     // Re-render the image table
+});
+
+const colorMap1 = {
+  0: [212, 212, 212], // #d4d4d4 - White
+  1: [0, 0, 0],       // #000000 - Black
+  2: [120, 120, 120], // #787878 - Gray
+  3: [220, 186, 186], // #dcbaba - Light Red
+  4: [187, 184, 221], // #bbb8dd - Light Blue
+  5: [220, 220, 186], // #dcdcba - Light Yellow
+  6: [255, 0, 0],     // #ff0000 - Red
+  7: [0, 0, 255],     // #0000ff - Blue
+  8: [0, 255, 0],     // #00ff00 - Green
+};
+
+const formattedColors = [
+    { id: 0, rgb: [212, 212, 212] }, // #d4d4d4 - White
+    { id: 1, rgb: [0, 0, 0] },       // #000000 - Black
+    { id: 2, rgb: [120, 120, 120] }, // #787878 - Gray
+    { id: 3, rgb: [220, 186, 186] }, // #dcbaba - Light Red
+    { id: 4, rgb: [187, 184, 221] }, // #bbb8dd - Light Blue
+    { id: 5, rgb: [220, 220, 186] }, // #dcdcba - Light Yellow
+    { id: 6, rgb: [255, 0, 0] },     // #ff0000 - Red
+    { id: 7, rgb: [0, 0, 255] },     // #0000ff - Blue
+    { id: 8, rgb: [0, 255, 0] },     // #00ff00 - Green
+];
+
+
+function findNearestColor(pixel) {
+  let minDist = Number.MAX_VALUE;
+  let nearestColorId = 0;
+
+  for (const color of formattedColors) {
+    const dist = Math.sqrt(
+      Math.pow(pixel[0] - color.rgb[0], 2) +
+      Math.pow(pixel[1] - color.rgb[1], 2) +
+      Math.pow(pixel[2] - color.rgb[2], 2)
+    );
+
+    if (dist < minDist) {
+      minDist = dist;
+      nearestColorId = color.id;
+    }
+  }
+
+  return nearestColorId;
+}
+
+
+let ditheredArray = []; // Global variable
+
+function applyDithering(imageData) { 
+  const technique = document.getElementById("dithering-technique").value;
+
+  switch (technique) {
+    case "nearest":
+      return applyNearestColorDithering(imageData);
+    case "floyd-steinberg":
+      return applyFloydSteinbergDithering(imageData);
+    case "bayer":
+      return applyBayerDithering(imageData);
+case "order":
+      return applyOrderedDithering(imageData);
+case "atkinson":
+      return applyAtkinsonDithering(imageData);
+case "jarvis":
+      return applyJarvisJudiceNinkeDithering(imageData);
+case "stucki":
+      return applyStuckiDithering(imageData);
+case "sierra":
+    return applySierraDithering(imageData);
+case "burkes":
+      return applyBurkesDithering(imageData);
+case "threshold":
+      return applyCustomThresholdDithering(imageData, threshold = 128);
+case "noise":
+    return applyRandomNoiseDithering(imageData);
+case "blue":
+    return applyBlueNoiseDithering(imageData);
+case "half":
+ return applyHalftoning(imageData);
+
+//case "stwo":
+ //return applySierra2_4A(imageData);
+//case "dot":
+ //return applyDotDiffusion(imageData);
+//case "two":
+ //return applyTwoRowSierra(imageData);
+//case "fan":
+ //return applyFanDithering(imageData);
+//case "cluster":
+ //return applyClusterDotDithering(imageData, clusterSize = 3);
+//case "osm":
+ //return applyOstromoukhovDithering(imageData);
+//case "gradient":
+ //return applyGradientBasedDithering(imageData);
+//case "rim":
+ //return applyRiemersmaDithering(imageData);
+
+
+
+    default:
+      return applyNearestColorDithering(imageData);
+  }
+}
+
+function applyRiemersmaDithering(imageData) {
+  const width = imageData.width;
+  const height = imageData.height;
+  const data = imageData.data;
+
+  const ditheredArray = []; // Reset the global array
+
+  // Loop through each pixel
+  for (let y = 0; y < height; y++) {
+    const row = [];
+    for (let x = 0; x < width; x++) {
+      const index = (y * width + x) * 4;
+
+      // Get the original pixel
+      const oldPixel = [data[index], data[index + 1], data[index + 2], data[index + 3]];
+
+      // Convert the pixel to grayscale intensity (0-255)
+      const grayscaleValue = 0.3 * oldPixel[0] + 0.59 * oldPixel[1] + 0.11 * oldPixel[2];
+
+      // Find the nearest color (0 or 255 for black and white)
+      const nearestColor = grayscaleValue > 128 ? 255 : 0;
+
+      // Compute the error
+      const error = grayscaleValue - nearestColor;
+
+      // Set the current pixel to the nearest color
+      data[index] = nearestColor;
+      data[index + 1] = nearestColor;
+      data[index + 2] = nearestColor;
+
+      // Distribute the error using the Riemersma pattern
+      distributeErrorRiemersma(data, x, y, width, height, error);
+    }
+    ditheredArray.push(row);
+  }
+
+  return ditheredArray;
+}
+
+function distributeErrorRiemersma(data, x, y, width, height, error) {
+  // Define weights based on Riemersma's error diffusion pattern
+  const weights = [
+    { x: 1, y: 0, weight: -1 / 3 }, // Right pixel
+    { x: 0, y: 1, weight: -1 / 3 }, // Below pixel
+    { x: 1, y: 1, weight: 1 }        // Bottom right pixel
+  ];
+
+  for (const { x: dx, y: dy, weight } of weights) {
+    const newX = x + dx;
+    const newY = y + dy;
+
+    // Ensure the pixel is within bounds
+    if (newX >= 0 && newX < width && newY >= 0 && newY < height) {
+      const index = (newY * width + newX) * 4;
+
+      // Adjust the neighboring pixel's grayscale value based on the error and weight
+      data[index] += error * weight;
+      data[index + 1] += error * weight;
+      data[index + 2] += error * weight;
+    }
+  }
+}
+
+function applyClusterDotDithering(imageData, clusterSize = 3) {
+  const width = imageData.width;
+  const height = imageData.height;
+  const data = imageData.data;
+
+  const ditheredArray = []; // Reset the global array
+
+  // Loop through each pixel
+  for (let y = 0; y < height; y++) {
+    const row = [];
+    for (let x = 0; x < width; x++) {
+      const index = (y * width + x) * 4;
+
+      // Get the original pixel
+      const oldPixel = [data[index], data[index + 1], data[index + 2], data[index + 3]];
+
+      // Convert the pixel to grayscale intensity (0-255)
+      const grayscaleValue = 0.3 * oldPixel[0] + 0.59 * oldPixel[1] + 0.11 * oldPixel[2];
+
+      // Calculate the number of dots based on grayscale value
+      const dotCount = Math.round((grayscaleValue / 255) * (clusterSize * clusterSize));
+
+      // Set the cluster of dots in a square pattern
+      for (let dy = 0; dy < clusterSize; dy++) {
+        for (let dx = 0; dx < clusterSize; dx++) {
+          const dotIndex = ((y + dy) * width + (x + dx)) * 4;
+          if (dotCount > 0) {
+            data[dotIndex] = 255;     // Set to white
+            data[dotIndex + 1] = 255; // Set to white
+            data[dotIndex + 2] = 255; // Set to white
+          } else {
+            data[dotIndex] = 0;       // Set to black
+            data[dotIndex + 1] = 0;   // Set to black
+            data[dotIndex + 2] = 0;   // Set to black
+          }
+          dotCount--;
+        }
+      }
+    }
+    ditheredArray.push(row);
+  }
+
+  return ditheredArray;
+}
+function applyGradientBasedDithering(imageData) {
+  const width = imageData.width;
+  const height = imageData.height;
+  const data = imageData.data;
+
+  const ditheredArray = []; // Reset the global array
+
+  // Loop through each pixel
+  for (let y = 0; y < height; y++) {
+    const row = [];
+    for (let x = 0; x < width; x++) {
+      const index = (y * width + x) * 4;
+
+      // Get the original pixel
+      const oldPixel = [data[index], data[index + 1], data[index + 2], data[index + 3]];
+
+      // Convert the pixel to grayscale intensity (0-255)
+      const grayscaleValue = 0.3 * oldPixel[0] + 0.59 * oldPixel[1] + 0.11 * oldPixel[2];
+
+      // Find the nearest color (0 or 255 for black and white)
+      const nearestColor = grayscaleValue > 128 ? 255 : 0;
+
+      // Compute the error
+      const error = grayscaleValue - nearestColor;
+
+      // Set the current pixel to the nearest color
+      data[index] = nearestColor;
+      data[index + 1] = nearestColor;
+      data[index + 2] = nearestColor;
+
+      // Distribute the error based on gradient
+      distributeErrorWithGradient(data, x, y, width, height, error, oldPixel);
+    }
+    ditheredArray.push(row);
+  }
+
+  return ditheredArray;
+}
+
+function distributeErrorWithGradient(data, x, y, width, height, error, oldPixel) {
+  const gradient = computeGradient(data, x, y, width, height);
+
+  // Example weights based on the gradient (customize as needed)
+  const weights = [
+    { x: 1, y: 0, weight: gradient > 0.5 ? 0.4 : 0.2 },   // Right pixel
+    { x: 0, y: 1, weight: gradient > 0.5 ? 0.3 : 0.2 },   // Directly below
+    { x: 1, y: 1, weight: gradient > 0.5 ? 0.2 : 0.1 },   // Bottom right pixel
+    { x: -1, y: 1, weight: gradient > 0.5 ? 0.2 : 0.1 },  // Bottom left pixel
+  ];
+
+  for (const { x: dx, y: dy, weight } of weights) {
+    const newX = x + dx;
+    const newY = y + dy;
+
+    // Ensure the pixel is within bounds
+    if (newX >= 0 && newX < width && newY >= 0 && newY < height) {
+      const index = (newY * width + newX) * 4;
+
+      // Adjust the neighboring pixel's grayscale value based on the error and weight
+      data[index] += error * weight;
+      data[index + 1] += error * weight;
+      data[index + 2] += error * weight;
+    }
+  }
+}
+
+function computeGradient(data, x, y, width, height) {
+  const leftPixel = x > 0 ? [data[((y * width) + (x - 1)) * 4], data[((y * width) + (x - 1)) * 4 + 1], data[((y * width) + (x - 1)) * 4 + 2]] : [0, 0, 0];
+  const rightPixel = x < width - 1 ? [data[((y * width) + (x + 1)) * 4], data[((y * width) + (x + 1)) * 4 + 1], data[((y * width) + (x + 1)) * 4 + 2]] : [0, 0, 0];
+  
+  const topPixel = y > 0 ? [data[(((y - 1) * width) + x) * 4], data[(((y - 1) * width) + x) * 4 + 1], data[(((y - 1) * width) + x) * 4 + 2]] : [0, 0, 0];
+  const bottomPixel = y < height - 1 ? [data[(((y + 1) * width) + x) * 4], data[(((y + 1) * width) + x) * 4 + 1], data[(((y + 1) * width) + x) * 4 + 2]] : [0, 0, 0];
+
+  // Compute gradients
+  const gx = Math.abs(leftPixel[0] - rightPixel[0]) + Math.abs(leftPixel[1] - rightPixel[1]) + Math.abs(leftPixel[2] - rightPixel[2]);
+  const gy = Math.abs(topPixel[0] - bottomPixel[0]) + Math.abs(topPixel[1] - bottomPixel[1]) + Math.abs(topPixel[2] - bottomPixel[2]);
+
+  // Normalize gradient value (0 to 1)
+  return Math.min(1, Math.sqrt(gx * gx + gy * gy) / (255 * Math.sqrt(2)));
+}
+
+function applyFanDithering(imageData) {
+  const width = imageData.width;
+  const height = imageData.height;
+  const data = imageData.data;
+
+  const ditheredArray = []; // Reset the global array
+
+  // Loop through each pixel
+  for (let y = 0; y < height; y++) {
+    const row = [];
+    for (let x = 0; x < width; x++) {
+      const index = (y * width + x) * 4;
+
+      // Get the original pixel
+      const oldPixel = [data[index], data[index + 1], data[index + 2], data[index + 3]];
+
+      // Convert the pixel to grayscale intensity (0-255)
+      const grayscaleValue = 0.3 * oldPixel[0] + 0.59 * oldPixel[1] + 0.11 * oldPixel[2];
+
+      // Find the nearest color (0 or 255 for black and white)
+      const nearestColor = grayscaleValue > 128 ? 255 : 0;
+
+      // Compute the error
+      const error = grayscaleValue - nearestColor;
+
+      // Set the current pixel to the nearest color
+      data[index] = nearestColor;
+      data[index + 1] = nearestColor;
+      data[index + 2] = nearestColor;
+
+      // Distribute the error to neighboring pixels (Fan Dithering)
+      distributeError(data, x, y, width, height, error, [
+        { x: 1, y: 0, weight: 4 / 16 },   // Right pixel
+        { x: 2, y: 0, weight: 2 / 16 },   // Two pixels to the right
+        { x: -1, y: 1, weight: 3 / 16 },  // One pixel to the left, one row down
+        { x: 0, y: 1, weight: 2 / 16 },   // Directly below
+        { x: 1, y: 1, weight: 1 / 16 }    // Bottom right pixel
+      ]);
+    }
+    ditheredArray.push(row);
+  }
+
+  return ditheredArray;
+}
+
+function distributeError(data, x, y, width, height, error, weights) {
+  for (const { x: dx, y: dy, weight } of weights) {
+    const newX = x + dx;
+    const newY = y + dy;
+
+    // Ensure the pixel is within bounds
+    if (newX >= 0 && newX < width && newY >= 0 && newY < height) {
+      const index = (newY * width + newX) * 4;
+
+      // Adjust the neighboring pixel's grayscale value based on the error and weight
+      data[index] += error * weight;
+      data[index + 1] += error * weight;
+      data[index + 2] += error * weight;
+    }
+  }
+}
+
+function applyDotDiffusion(imageData) {
+  const width = imageData.width;
+  const height = imageData.height;
+  const data = imageData.data;
+
+  const ditheredArray = []; // Reset the global array
+
+  // Loop through each pixel
+  for (let y = 0; y < height; y++) {
+    const row = [];
+    for (let x = 0; x < width; x++) {
+      const index = (y * width + x) * 4;
+                    
+
+      // Get the original pixel
+      const oldPixel = [data[index], data[index + 1], data[index + 2], data[index + 3]];
+
+      // Convert the pixel to grayscale intensity (0-255)
+      const grayscaleValue = 0.3 * oldPixel[0] + 0.59 * oldPixel[1] + 0.11 * oldPixel[2];
+
+      // Find the nearest color (0 or 255 for black and white)
+      const nearestColor = grayscaleValue > 128 ? 255 : 0;
+
+      // Compute the error
+      const error = grayscaleValue - nearestColor;
+
+      // Set the current pixel to the nearest color
+      data[index] = nearestColor;
+      data[index + 1] = nearestColor;
+      data[index + 2] = nearestColor;
+
+      // Distribute the error to neighboring pixels (dot diffusion)
+      distributeError(data, x, y, width, height, error, [
+        { x: 1, y: 0, weight: 0.25 },   // Right pixel
+        { x: 0, y: 1, weight: 0.25 },   // Below pixel
+        { x: 1, y: 1, weight: 0.5 }      // Bottom right pixel
+      ]);
+    }
+    ditheredArray.push(row);
+  }
+
+  return ditheredArray;
+}
+
+function distributeError(data, x, y, width, height, error, weights) {
+  for (const { x: dx, y: dy, weight } of weights) {
+    const newX = x + dx;
+    const newY = y + dy;
+
+    // Ensure the pixel is within bounds
+    if (newX >= 0 && newX < width && newY >= 0 && newY < height) {
+      const index = (newY * width + newX) * 4;
+
+      // Adjust the neighboring pixel's grayscale value based on the error and weight
+      data[index] += error * weight;
+      data[index + 1] += error * weight;
+      data[index[index + 2]] += error * weight;
+    }
+  }
+}
+function applyOstromoukhovDithering(imageData) {
+  const width = imageData.width;
+  const height = imageData.height;
+  const data = imageData.data;
+
+  const ditheredArray = []; // Reset the global array
+
+  // Loop through each pixel
+  for (let y = 0; y < height; y++) {
+    const row = [];
+    for (let x = 0; x < width; x++) {
+      const index = (y * width + x) * 4;
+
+      // Get the original pixel
+      const oldPixel = [data[index], data[index + 1], data[index + 2], data[index + 3]];
+
+      // Convert the pixel to grayscale intensity (0-255)
+      const grayscaleValue = 0.3 * oldPixel[0] + 0.59 * oldPixel[1] + 0.11 * oldPixel[2];
+
+      // Find the nearest color (0 or 255 for black and white)
+      const nearestColor = grayscaleValue > 128 ? 255 : 0;
+
+      // Compute the error
+      const error = grayscaleValue - nearestColor;
+
+      // Set the current pixel to the nearest color
+      data[index] = nearestColor;
+      data[index + 1] = nearestColor;
+      data[index + 2] = nearestColor;
+
+      // Distribute the error to neighboring pixels (Ostromoukhov Dithering)
+      distributeError(data, x, y, width, height, error, [
+        { x: 1, y: 0, weight: 1 / 8 },   // Right pixel
+        { x: 0, y: 1, weight: 1 / 8 },   // Directly below
+        { x: 1, y: 1, weight: 1 / 8 },   // Bottom right pixel
+        { x: -1, y: 1, weight: 1 / 8 },  // Bottom left pixel
+        { x: 1, y: -1, weight: 1 / 8 },  // Top right pixel
+        { x: -1, y: 0, weight: 1 / 8 }   // Left pixel
+      ]);
+    }
+    ditheredArray.push(row);
+  }
+
+  return ditheredArray;
+}
+
+function distributeError(data, x, y, width, height, error, weights) {
+  for (const { x: dx, y: dy, weight } of weights) {
+    const newX = x + dx;
+    const newY = y + dy;
+
+    // Ensure the pixel is within bounds
+    if (newX >= 0 && newX < width && newY >= 0 && newY < height) {
+      const index = (newY * width + newX) * 4;
+
+      // Adjust the neighboring pixel's grayscale value based on the error and weight
+      data[index] += error * weight;
+      data[index + 1] += error * weight;
+      data[index + 2] += error * weight;
+    }
+  }
+}
+
+function applyRandomNoiseDithering(imageData) {
+  const width = imageData.width;
+  const height = imageData.height;
+  const data = imageData.data;
+
+  ditheredArray = []; // Reset the global array
+
+  for (let y = 0; y < height; y++) {
+    const row = [];
+    for (let x = 0; x < width; x++) {
+      const index = (y * width + x) * 4;
+      const oldPixel = [data[index], data[index + 1], data[index + 2], data[index + 3]];
+      const noise = Math.random() * 255;
+      const noisyPixel = oldPixel.map(value => value + noise);
+
+      const nearestColorId = findNearestColor(noisyPixel);
+      row.push(nearestColorId);
+    }
+    ditheredArray.push(row);
+  }
+  return ditheredArray;
+}
+function applyTwoRowSierra(imageData) {
+  const width = imageData.width;
+  const height = imageData.height;
+  const data = imageData.data;
+
+  const ditheredArray = []; // Reset the global array
+
+  // Loop through each pixel
+  for (let y = 0; y < height; y++) {
+    const row = [];
+    for (let x = 0; x < width; x++) {
+      const index = (y * width + x) * 4;
+
+      // Get the original pixel
+      const oldPixel = [data[index], data[index + 1], data[index + 2], data[index + 3]];
+
+      // Convert the pixel to grayscale intensity (0-255)
+      const grayscaleValue = 0.3 * oldPixel[0] + 0.59 * oldPixel[1] + 0.11 * oldPixel[2];
+
+      // Find the nearest color (0 or 255 for black and white)
+      const nearestColor = grayscaleValue > 128 ? 255 : 0;
+
+      // Compute the error
+      const error = grayscaleValue - nearestColor;
+
+      // Set the current pixel to the nearest color
+      data[index] = nearestColor;
+      data[index + 1] = nearestColor;
+      data[index + 2] = nearestColor;
+
+      // Distribute the error to neighboring pixels (Two-Row Sierra)
+      distributeError(data, x, y, width, height, error, [
+        { x: 1, y: 0, weight: 5 / 32 },   // Right pixel
+        { x: 2, y: 0, weight: 3 / 32 },   // Two pixels to the right
+        { x: -2, y: 1, weight: 2 / 32 },  // Two pixels to the left, one row down
+        { x: -1, y: 1, weight: 3 / 32 },  // One pixel to the left, one row down
+        { x: 0, y: 1, weight: 2 / 32 }    // Directly below
+      ]);
+    }
+    ditheredArray.push(row);
+  }
+
+  return ditheredArray;
+}
+
+function distributeError(data, x, y, width, height, error, weights) {
+  for (const { x: dx, y: dy, weight } of weights) {
+    const newX = x + dx;
+    const newY = y + dy;
+
+    // Ensure the pixel is within bounds
+    if (newX >= 0 && newX < width && newY >= 0 && newY < height) {
+      const index = (newY * width + newX) * 4;
+
+      // Adjust the neighboring pixel's grayscale value based on the error and weight
+      data[index] += error * weight;
+      data[index + 1] += error * weight;
+      data[index + 2] += error * weight;
+    }
+  }
+}
+
+function applyHalftoning(imageData) {
+  const width = imageData.width;
+  const height = imageData.height;
+  const data = imageData.data;
+
+  const ditheredArray = []; // Reset the global array
+
+  // Predefined patterns for halftoning (4x4 block)
+  const halftonePatterns = [
+    [0, 0, 0, 0],   // Black (Grayscale: 0-63)
+    [1, 0, 0, 0],   // Dark Gray (Grayscale: 64-127)
+    [1, 0, 1, 0],   // Medium Gray (Grayscale: 128-191)
+    [1, 1, 1, 0],   // Light Gray (Grayscale: 192-255)
+    [1, 1, 1, 1]    // White
+  ];
+
+  // Convert image to grayscale and apply halftoning
+  for (let y = 0; y < height; y += 2) {
+    const row = [];
+    for (let x = 0; x < width; x += 2) {
+      const index = (y * width + x) * 4;
+      const oldPixel = [data[index], data[index + 1], data[index + 2], data[index + 3]];
+
+      // Convert the pixel to grayscale intensity (0-255)
+      const grayscaleValue = 0.3 * oldPixel[0] + 0.59 * oldPixel[1] + 0.11 * oldPixel[2];
+
+      // Choose the halftone pattern based on the grayscale intensity
+      let pattern;
+      if (grayscaleValue < 64) {
+        pattern = halftonePatterns[0];
+      } else if (grayscaleValue < 128) {
+        pattern = halftonePatterns[1];
+      } else if (grayscaleValue < 192) {
+        pattern = halftonePatterns[2];
+      } else if (grayscaleValue < 255) {
+        pattern = halftonePatterns[3];
+      } else {
+        pattern = halftonePatterns[4];
+      }
+
+      // Apply the chosen pattern to the pixel and its neighbors
+      row.push(pattern[0], pattern[1], pattern[2], pattern[3]);
+    }
+    ditheredArray.push(row);
+  }
+
+  return ditheredArray;
+}
+ 
+function applyCustomThresholdDithering(imageData, threshold = 128) {
+  const width = imageData.width;
+  const height = imageData.height;
+  const data = imageData.data;
+
+  ditheredArray = []; // Reset the global array
+
+  for (let y = 0; y < height; y++) {
+    const row = [];
+    for (let x = 0; x < width; x++) {
+      const index = (y * width + x) * 4;
+      const oldPixel = [data[index], data[index + 1], data[index + 2], data[index + 3]];
+      const grayscaleValue = 0.3 * oldPixel[0] + 0.59 * oldPixel[1] + 0.11 * oldPixel[2];
+
+      const nearestColorId = (grayscaleValue > threshold) ? findNearestColor([255, 255, 255]) : findNearestColor([0, 0, 0]);
+      row.push(nearestColorId);
+    }
+    ditheredArray.push(row);
+  }
+  return ditheredArray;
+}
+
+function applyBurkesDithering(imageData) {
+  const width = imageData.width;
+  const height = imageData.height;
+  const data = imageData.data;
+
+  ditheredArray = [];
+
+  for (let y = 0; y < height; y++) {
+    const row = [];
+    for (let x = 0; x < width; x++) {
+      const index = (y * width + x) * 4;
+      const oldPixel = [data[index], data[index + 1], data[index + 2], data[index + 3]];
+      const nearestColorId = findNearestColor(oldPixel);
+      row.push(nearestColorId);
+
+      // Calculate error
+      const newPixel = colorMap1[nearestColorId];
+      const error = oldPixel.map((value, i) => value - newPixel[i]);
+
+      // Spread the error over nearby pixels
+      const distribution = [
+        [8 / 32, 1, 0], [4 / 32, 2, 0], [2 / 32, -2, 1], [4 / 32, -1, 1],
+        [8 / 32, 0, 1], [4 / 32, 1, 1], [2 / 32, 2, 1]
+      ];
+
+      for (const [factor, dx, dy] of distribution) {
+        if (x + dx >= 0 && x + dx < width && y + dy < height) {
+          const neighborIndex = ((y + dy) * width + (x + dx)) * 4;
+          data[neighborIndex] += error[0] * factor;
+          data[neighborIndex + 1] += error[1] * factor;
+          data[neighborIndex + 2] += error[2] * factor;
+        }
+      }
+    }
+    ditheredArray.push(row);
+  }
+  return ditheredArray;
+}
+
+function applySierra2_4A(imageData) {
+  const width = imageData.width;
+  const height = imageData.height;
+  const data = imageData.data;
+
+  const ditheredArray = []; // Reset the global array
+
+  // Loop through each pixel
+  for (let y = 0; y < height; y++) {
+    const row = [];
+    for (let x = 0; x < width; x++) {
+      const index = (y * width + x) * 4;
+
+      // Get the original pixel
+      const oldPixel = [data[index], data[index + 1], data[index + 2], data[index + 3]];
+
+      // Convert the pixel to grayscale intensity (0-255)
+      const grayscaleValue = 0.3 * oldPixel[0] + 0.59 * oldPixel[1] + 0.11 * oldPixel[2];
+
+      // Find the nearest color (0 or 255 for black and white)
+      const nearestColor = grayscaleValue > 128 ? 255 : 0;
+
+      // Compute the error
+      const error = grayscaleValue - nearestColor;
+
+      // Set the current pixel to the nearest color
+      data[index] = nearestColor;
+      data[index + 1] = nearestColor;
+      data[index + 2] = nearestColor;
+
+      // Spread the error to the surrounding pixels (Sierra-2-4A)
+      distributeError(data, x, y, width, height, error, [
+        { x: 1, y: 0, weight: 4 / 16 },
+        { x: 2, y: 0, weight: 3 / 16 },
+        { x: -2, y: 1, weight: 2 / 16 },
+        { x: -1, y: 1, weight: 3 / 16 },
+        { x: 0, y: 1, weight: 2 / 16 }
+      ]);
+    }
+    ditheredArray.push(row);
+  }
+
+  return ditheredArray;
+}
+
+function distributeError(data, x, y, width, height, error, weights) {
+  for (const { x: dx, y: dy, weight } of weights) {
+    const newX = x + dx;
+    const newY = y + dy;
+
+    // Ensure the pixel is within bounds
+    if (newX >= 0 && newX < width && newY >= 0 && newY < height) {
+      const index = (newY * width + newX) * 4;
+
+      // Adjust the neighboring pixel's grayscale value based on the error and weight
+      data[index] += error * weight;
+      data[index + 1] += error * weight;
+      data[index + 2] += error * weight;
+    }
+  }
+}
+ 
+function applyBlueNoiseDithering(imageData) {
+  const width = imageData.width;
+  const height = imageData.height;
+  const data = imageData.data;
+
+  ditheredArray = []; // Reset the global array
+
+  // Generate blue noise texture
+  const blueNoiseTexture = [];
+  for (let y = 0; y < height; y++) {
+    const row = [];
+    for (let x = 0; x < width; x++) {
+      row.push(Math.floor(Math.random() * 256)); // Random noise for blue noise approximation
+    }
+    blueNoiseTexture.push(row);
+  }
+
+  // Apply blue noise dithering
+  for (let y = 0; y < height; y++) {
+    const row = [];
+    for (let x = 0; x < width; x++) {
+      const index = (y * width + x) * 4;
+      const oldPixel = [data[index], data[index + 1], data[index + 2], data[index + 3]];
+
+      // Convert the pixel to grayscale intensity (0-255)
+      const grayscaleValue = 0.3 * oldPixel[0] + 0.59 * oldPixel[1] + 0.11 * oldPixel[2];
+
+      // Get the corresponding value from the blue noise texture
+      const noiseValue = blueNoiseTexture[y][x];
+
+      // Threshold comparison with blue noise
+      if (grayscaleValue > noiseValue) {
+        row.push(findNearestColor([255, 255, 255])); // White or nearest color
+      } else {
+        row.push(findNearestColor([0, 0, 0])); // Black or nearest color
+      }
+    }
+    ditheredArray.push(row);
+  }
+  
+  return ditheredArray;
+}
+
+function applyNearestColorDithering(imageData) {
+  const width = imageData.width;
+  const height = imageData.height;
+  const data = imageData.data;
+
+  ditheredArray = []; // Reset the global array
+
+  for (let y = 0; y < height; y++) {
+    const row = [];
+    for (let x = 0; x < width; x++) {
+      const index = (y * width + x) * 4;
+      const oldPixel = [data[index], data[index + 1], data[index + 2], data[index + 3]];
+
+      if (oldPixel[3] === 0) {
+        row.push(50); // Transparent
+      } else {
+        const nearestColorId = findNearestColor(oldPixel);
+        row.push(nearestColorId);
+      }
+    }
+    ditheredArray.push(row);
+  }
+  return ditheredArray;
+}
+
+
+function applyFloydSteinbergDithering(imageData) {
+  const width = imageData.width;
+  const height = imageData.height;
+  const data = imageData.data;
+
+  ditheredArray = []; // Reset the global array
+
+  for (let y = 0; y < height; y++) {
+    const row = [];
+    for (let x = 0; x < width; x++) {
+      const index = (y * width + x) * 4;
+      const oldPixel = [data[index], data[index + 1], data[index + 2], data[index + 3]];
+      const nearestColorId = findNearestColor(oldPixel);
+      row.push(nearestColorId);
+
+      // Calculate error
+      const newPixel = colorMap1[nearestColorId];
+      const error = oldPixel.map((value, i) => value - newPixel[i]);
+
+      // Spread the error to neighboring pixels
+      if (x + 1 < width) {
+        const nextIndex = (y * width + (x + 1)) * 4;
+        data[nextIndex] += error[0] * 7 / 16;
+        data[nextIndex + 1] += error[1] * 7 / 16;
+        data[nextIndex + 2] += error[2] * 7 / 16;
+      }
+      if (y + 1 < height) {
+        const downIndex = ((y + 1) * width + x) * 4;
+        data[downIndex] += error[0] * 5 / 16;
+        data[downIndex + 1] += error[1] * 5 / 16;
+        data[downIndex + 2] += error[2] * 5 / 16;
+
+        if (x + 1 < width) {
+          const downRightIndex = ((y + 1) * width + (x + 1)) * 4;
+          data[downRightIndex] += error[0] * 1 / 16;
+          data[downRightIndex + 1] += error[1] * 1 / 16;
+          data[downRightIndex + 2] += error[2] * 1 / 16;
+        }
+      }
+    }
+    ditheredArray.push(row);
+  }
+  return ditheredArray;
+}
+
+
+
+function applyBayerDithering(imageData) {
+  const width = imageData.width;
+  const height = imageData.height;
+  const data = imageData.data;
+  const bayerMatrix = [
+    [0, 128, 32, 160],
+    [192, 64, 224, 96],
+    [48, 176, 16, 144],
+    [240, 112, 208, 80]
+  ];
+
+  ditheredArray = []; // Reset the global array
+  const matrixSize = 4;
+
+  for (let y = 0; y < height; y++) {
+    const row = [];
+    for (let x = 0; x < width; x++) {
+      const index = (y * width + x) * 4;
+      const oldPixel = [data[index], data[index + 1], data[index + 2], data[index + 3]];
+      const threshold = bayerMatrix[y % matrixSize][x % matrixSize] / 255 * 255; // Scale to range [0, 255]
+
+      const nearestColorId = (oldPixel[0] > threshold) ? findNearestColor([255, 255, 255]) : findNearestColor([0, 0, 0]);
+      row.push(nearestColorId);
+    }
+    ditheredArray.push(row);
+  }
+  return ditheredArray;
+}
+
+
+function applyStuckiDithering(imageData) {
+  const width = imageData.width;
+  const height = imageData.height;
+  const data = imageData.data;
+
+  ditheredArray = [];
+
+  for (let y = 0; y < height; y++) {
+    const row = [];
+    for (let x = 0; x < width; x++) {
+      const index = (y * width + x) * 4;
+      const oldPixel = [data[index], data[index + 1], data[index + 2], data[index + 3]];
+      const nearestColorId = findNearestColor(oldPixel);
+      row.push(nearestColorId);
+
+      // Calculate error
+      const newPixel = colorMap1[nearestColorId];
+      const error = oldPixel.map((value, i) => value - newPixel[i]);
+
+      // Spread the error over nearby pixels
+      const distribution = [
+        [8 / 42, 1, 0], [4 / 42, 2, 0], [2 / 42, -2, 1], [4 / 42, -1, 1],
+        [8 / 42, 0, 1], [4 / 42, 1, 1], [2 / 42, 2, 1], [1 / 42, -2, 2],
+        [2 / 42, -1, 2], [4 / 42, 0, 2], [2 / 42, 1, 2], [1 / 42, 2, 2]
+      ];
+
+      for (const [factor, dx, dy] of distribution) {
+        if (x + dx >= 0 && x + dx < width && y + dy < height) {
+          const neighborIndex = ((y + dy) * width + (x + dx)) * 4;
+          data[neighborIndex] += error[0] * factor;
+          data[neighborIndex + 1] += error[1] * factor;
+          data[neighborIndex + 2] += error[2] * factor;
+        }
+      }
+    }
+    ditheredArray.push(row);
+  }
+  return ditheredArray;
+}
+
+function applySierraDithering(imageData) {
+  const width = imageData.width;
+  const height = imageData.height;
+  const data = imageData.data;
+
+  ditheredArray = [];
+
+  for (let y = 0; y < height; y++) {
+    const row = [];
+    for (let x = 0; x < width; x++) {
+      const index = (y * width + x) * 4;
+      const oldPixel = [data[index], data[index + 1], data[index + 2], data[index + 3]];
+      const nearestColorId = findNearestColor(oldPixel);
+      row.push(nearestColorId);
+
+      // Calculate error
+      const newPixel = colorMap1[nearestColorId];
+      const error = oldPixel.map((value, i) => value - newPixel[i]);
+
+      // Spread the error over nearby pixels
+      const distribution = [
+        [5 / 32, 1, 0], [3 / 32, 2, 0], [2 / 32, -2, 1], [4 / 32, -1, 1],
+        [5 / 32, 0, 1], [4 / 32, 1, 1], [2 / 32, 2, 1], [2 / 32, -1, 2],
+        [3 / 32, 0, 2], [2 / 32, 1, 2]
+      ];
+
+      for (const [factor, dx, dy] of distribution) {
+        if (x + dx >= 0 && x + dx < width && y + dy < height) {
+          const neighborIndex = ((y + dy) * width + (x + dx)) * 4;
+          data[neighborIndex] += error[0] * factor;
+          data[neighborIndex + 1] += error[1] * factor;
+          data[neighborIndex + 2] += error[2] * factor;
+        }
+      }
+    }
+    ditheredArray.push(row);
+  }
+  return ditheredArray;
+}
+
+
+function applyOrderedDithering(imageData) {
+  const width = imageData.width;
+  const height = imageData.height;
+  const data = imageData.data;
+  const thresholdMatrix = [
+    [0, 128],
+    [192, 64]
+  ];
+
+  ditheredArray = []; // Reset the global array
+  const matrixSize = 2;
+
+  for (let y = 0; y < height; y++) {
+    const row = [];
+    for (let x = 0; x < width; x++) {
+      const index = (y * width + x) * 4;
+      const oldPixel = [data[index], data[index + 1], data[index + 2], data[index + 3]];
+      const threshold = thresholdMatrix[y % matrixSize][x % matrixSize];
+
+      const nearestColorId = (oldPixel[0] > threshold) ? findNearestColor([255, 255, 255]) : findNearestColor([0, 0, 0]);
+      row.push(nearestColorId);
+    }
+    ditheredArray.push(row);
+  }
+  return ditheredArray;
+}
+
+function applyAtkinsonDithering(imageData) {
+  const width = imageData.width;
+  const height = imageData.height;
+  const data = imageData.data;
+
+  ditheredArray = []; // Reset the global array
+
+  for (let y = 0; y < height; y++) {
+    const row = [];
+    for (let x = 0; x < width; x++) {
+      const index = (y * width + x) * 4;
+      const oldPixel = [data[index], data[index + 1], data[index + 2], data[index + 3]];
+      const nearestColorId = findNearestColor(oldPixel);
+      row.push(nearestColorId);
+
+      // Calculate error
+      const newPixel = colorMap1[nearestColorId];
+      const error = oldPixel.map((value, i) => value - newPixel[i]);
+
+      // Spread the error to neighboring pixels
+      if (x + 1 < width) {
+        const nextIndex = (y * width + (x + 1)) * 4;
+        data[nextIndex] += error[0] * 1 / 8;
+        data[nextIndex + 1] += error[1] * 1 / 8;
+        data[nextIndex + 2] += error[2] * 1 / 8;
+      }
+      if (y + 1 < height) {
+        const downIndex = ((y + 1) * width + x) * 4;
+        data[downIndex] += error[0] * 1 / 8;
+        data[downIndex + 1] += error[1] * 1 / 8;
+        data[downIndex + 2] += error[2] * 1 / 8;
+
+        if (x + 1 < width) {
+          const downRightIndex = ((y + 1) * width + (x + 1)) * 4;
+          data[downRightIndex] += error[0] * 1 / 8;
+          data[downRightIndex + 1] += error[1] * 1 / 8;
+          data[downRightIndex + 2] += error[2] * 1 / 8;
+        }
+        if (x - 1 >= 0) {
+          const downLeftIndex = ((y + 1) * width + (x - 1)) * 4;
+          data[downLeftIndex] += error[0] * 1 / 8;
+          data[downLeftIndex + 1] += error[1] * 1 / 8;
+          data[downLeftIndex + 2] += error[2] * 1 / 8;
+        }
+      }
+    }
+    ditheredArray.push(row);
+  }
+  return ditheredArray;
+}
+
+
+const canvas = document.getElementById("mainCanvas");
+const context = canvas.getContext("2d");
+
+document.getElementById('imageInput').addEventListener('change', function(event) {
+  const uploadedImage = event.target.files[0];
+  if (uploadedImage) {
+    const reader = new FileReader();
+
+    reader.onload = function(event) {
+      const uploadedImageData = new Image();
+      uploadedImageData.onload = function() {
+        canvas.width = uploadedImageData.width;
+        canvas.height = uploadedImageData.height;
+        context.drawImage(uploadedImageData, 0, 0);
+        updateResultTextArea();
+        displayImageTable(uploadedImageData);
+      };
+
+      uploadedImageData.src = event.target.result;
+    };
+
+    reader.readAsDataURL(uploadedImage);
+  }
+});
+
+
+function applyJarvisJudiceNinkeDithering(imageData) {
+  const width = imageData.width;
+  const height = imageData.height;
+  const data = imageData.data;
+
+  ditheredArray = [];
+
+  for (let y = 0; y < height; y++) {
+    const row = [];
+    for (let x = 0; x < width; x++) {
+      const index = (y * width + x) * 4;
+      const oldPixel = [data[index], data[index + 1], data[index + 2], data[index + 3]];
+      const nearestColorId = findNearestColor(oldPixel);
+      row.push(nearestColorId);
+
+      // Calculate error
+      const newPixel = colorMap1[nearestColorId];
+      const error = oldPixel.map((value, i) => value - newPixel[i]);
+
+      // Spread the error over nearby pixels
+      const distribution = [
+        [7 / 48, 1, 0], [5 / 48, 2, 0], [3 / 48, -2, 1], [5 / 48, -1, 1],
+        [7 / 48, 0, 1], [5 / 48, 1, 1], [3 / 48, 2, 1], [1 / 48, -2, 2],
+        [3 / 48, -1, 2], [5 / 48, 0, 2], [3 / 48, 1, 2], [1 / 48, 2, 2]
+      ];
+
+      for (const [factor, dx, dy] of distribution) {
+        if (x + dx >= 0 && x + dx < width && y + dy < height) {
+          const neighborIndex = ((y + dy) * width + (x + dx)) * 4;
+          data[neighborIndex] += error[0] * factor;
+          data[neighborIndex + 1] += error[1] * factor;
+          data[neighborIndex + 2] += error[2] * factor;
+        }
+      }
+    }
+    ditheredArray.push(row);
+  }
+  return ditheredArray;
+}
+ 
+function updateResultTextArea() {
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  const ditheredArray = applyDithering(imageData);
+
+  const resultTextArea = document.getElementById("result");
+  resultTextArea.value = JSON.stringify(ditheredArray);
+}
+
+function displayImageTable(image) {
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  const ditheredArray = applyDithering(imageData);
+
+  createTable(ditheredArray);
+}
+function createTable(array) {
+  const table = document.getElementById("arrayTable");
+
+  // Clear existing rows from the table
+  while (table.firstChild) {
+    table.removeChild(table.firstChild);
+  }
+
+  // Create new rows and cells
+  for (let i = 0; i < array.length; i++) {
+    const row = document.createElement("tr");
+    for (let j = 0; j < array[i].length; j++) {
+      const cell = document.createElement("td");
+      const number = array[i][j];
+
+      if (number === 50) {
+        cell.style.backgroundColor = "transparent"; // Set transparent background
+      } else {
+        const rgb = colorMap1[number].join(",");
+        cell.style.backgroundColor = `rgb(${rgb})`;
+      }
+
+      row.appendChild(cell);
+    }
+    table.appendChild(row);
+  }
+}
+
+   function png() {
+  console.log('Convert to PNG triggered');
+
+  if (ditheredArray.length === 0) {
+    console.error('Dithered array is empty! Ensure an image is loaded and processed.');
+    return;
+  }
+
+  const width = ditheredArray[0].length;
+  const height = ditheredArray.length;
+  console.log(`Array Dimensions: ${width}x${height}`);
+
+  const canvas = document.getElementById('outputCanvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d');
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const colorId = ditheredArray[y][x];
+      if (colorId !== 50) { // If not transparent
+        const color = getColorFromId(colorId);
+        console.log(`Drawing color at (${x}, ${y}): ${color}`);
+        context.fillStyle = color;
+        context.fillRect(x, y, 1, 1);
+      }
+    }
+  }
+
+  const downloadLink = document.createElement('a');
+  downloadLink.download = 'array_image.png';
+  downloadLink.href = canvas.toDataURL();
+  downloadLink.click();
+}
+
+
+
+   function getColorFromId(colorId) {
+  const colorMap = {
+  0: 'rgb(212, 212, 212)',   // #d4d4d4 - White
+1: 'rgb(0, 0, 0)',         // #000000 - Black
+2: 'rgb(120, 120, 120)',   // #787878 - Gray
+3: 'rgb(220, 186, 186)',   // #dcbaba - Light Red
+4: 'rgb(187, 184, 221)',   // #bbb8dd - Light Blue
+5: 'rgb(220, 220, 186)',   // #dcdcba - Light Yellow
+6: 'rgb(0, 117, 0)',       // #ff0000 - Red
+7: 'rgb(0, 117, 0)',       // #0000ff - Blue
+8: 'rgb(0, 117, 0)'        // #00ff00 - Green
+
+  };
+
+  return colorMap[colorId] || 'rgb(255, 255, 255)'; // Default to white if color not found
+}
+
+        var result6 = [];
+        var result7 = [];
+        var result8 = [];
+    function searchArray() {
+        var inputArray = document.getElementById("result").value.trim().split("],[");
+
+        // Handling the first and last rows
+        inputArray[0] = inputArray[0].replace("[", "");
+        inputArray[inputArray.length - 1] = inputArray[inputArray.length - 1].replace("]", "");
+
+
+		  var result678 = [];
+        for (var i = 0; i < inputArray.length; i++) {
+            var row = inputArray[i].split(",");
+            for (var j = 0; j < row.length; j++) {
+                if (row[j] === "6") {
+                    result6.push("(" + j + ", " + i + ")");
+							result678.push("(" + j + ", " + i + ")");
+                } else if (row[j] === "7") {
+                    result7.push("(" + j + ", " + i + ")");
+						  result678.push("(" + j + ", " + i + ")");
+                } else if (row[j] === "8") {
+                    result8.push("(" + j + ", " + i + ")");
+						  result678.push("(" + j + ", " + i + ")");
+
+
+                }
+            }
+        }
+
+    
+    }
+var formatted = [];
+
+
+
+function checkDefaultState(coordinates, color) {
+    coordinates.forEach(coord => {
+        var xy = coord.match(/\((\d+),\s*(\d+)\)/);
+        if (xy) {
+            var x = xy[1];
+            var y = xy[2];
+            var coordString = x + ',' + y;
+            if (formatted.hasOwnProperty(coordString)) {
+                formatted[coordString].defaultState = color;
+            }
+        }
+    });
+}
+function formatCoordinates() {
+    // Clear the formatted object before populating
+    formatted = {}; 
+
+    // Process all coordinates from result6, result7, and result8
+    function addCoordinatesToFormatted(coordsArray, color) {
+        coordsArray.forEach(coord => {
+            var xy = coord.match(/\((\d+),\s*(\d+)\)/);
+            if (xy) {
+                var x = xy[1];
+                var y = xy[2];
+                // Use the coordinate string as a key in the formatted object
+                formatted[x + ',' + y] = { defaultState: color }; // Assign object to coordinate key
+            }
+        });
+    }
+
+    // Add coordinates from result arrays with their respective colors
+    addCoordinatesToFormatted(result6, 'red');   // State 6
+    addCoordinatesToFormatted(result7, 'blue');   // State 7
+    addCoordinatesToFormatted(result8, 'green');  // State 8
+}
+
+function downloadJSON() {
+    // Create the JSON structure
+    var jsonData = {
+        info: {
+            name: "image",
+            author: "bambi",
+            gameMode: "normal"
+        },
+        switches: {},
+        fields: formatted,  // Directly assign formatted object to fields
+        portals: {},
+        marsballs: [],
+        spawnPoints: {      // Correctly define the spawnPoints object
+            red: [],
+            blue: []
+        }
+    };
+
+    // Convert the JSON object to a string
+    var jsonString = JSON.stringify(jsonData, null, 2);
+
+    // Create a Blob from the JSON string
+    var blob = new Blob([jsonString], { type: 'application/json' });
+
+    // Create a link element to download the file
+    var link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'data.json'; // Name of the downloaded file
+
+    // Programmatically click the link to trigger the download
+    link.click();
+}
+function json() {
+searchArray();
+formatCoordinates();
+downloadJSON();
+}
+  </script>
+
