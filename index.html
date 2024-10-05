@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Image To Map</title>
+  <title>Dithering with 2D Array</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -43,7 +43,14 @@
     #buttonContainer {
       margin: 20px 0;
     }
-
+ #overlayText {
+      position: absolute; /* Position the text absolutely within the canvas container */
+      top: 10px; /* Padding from the top */
+      right: 10px; /* Padding from the right */
+      color: black; /* Text color */
+      font-size: 20px; /* Text size */
+      pointer-events: none; /* Allow clicks to pass through the text */
+    }
     button {
       margin: 0 5px; /* Space between buttons */
       padding: 10px 15px;
@@ -79,6 +86,18 @@
   <div id="canvasContainer">
     <canvas id="outputCanvas"></canvas>
     <canvas id="mainCanvas"></canvas>
+    <div id="overlayText">
+#d4d4d4 - White Floor<br>
+ #000000 - Black Void<br>
+ #787878 - Gray Wall<br>
+ #dcbaba - Red Team Tile<br>
+ #bbb8dd - Blue Team Tile<br>
+ #dcdcba - Yellow Team Tile<br>
+ #ff0000 - Red Gate<br>
+ #0000ff - Blue Gate<br>
+ #00ff00 - Green Gate<br
+</div> 
+  </div>
   </div>
 
   <div id="buttonContainer">
@@ -1317,6 +1336,7 @@ function createTable(array) {
 6: 'rgb(0, 117, 0)',       // #ff0000 - Red
 7: 'rgb(0, 117, 0)',       // #0000ff - Blue
 8: 'rgb(0, 117, 0)'        // #00ff00 - Green
+
 
   };
 
